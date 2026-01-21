@@ -227,6 +227,31 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
             #map { bottom: 300px; }
             .stat { display: block; margin: 3px 0; }
         }
+        .orientation-btn {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 1000;
+            width: 50px;
+            height: 50px;
+            background: #ff9800;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 24px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.3s;
+        }
+        .orientation-btn:hover {
+            background: #f57c00;
+        }
+        .orientation-btn.active {
+            background: #ff5722;
+        }
         .modal {
             display: none;
             position: fixed;
@@ -297,7 +322,12 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
-    <div id="map"></div>
+    <div id="map">
+        <!-- Floating Orientation Button -->
+        <button id="orientationBtn" class="orientation-btn" onclick="toggleOrientation()" title="Toggle Map Orientation">
+            <i class="fas fa-compass"></i>
+        </button>
+    </div>
     <div id="info">
         <div id="gps-status" class="gps-status">
             <div class="current-position">📍 Current Position: <span id="current-coords">Waiting for GPS...</span></div>
@@ -311,16 +341,13 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
         <div class="stat"><span class="stat-label">Avg SNR:</span> <span id="avgsnr">N/A</span></div>
         <div class="stat"><span class="stat-label">Last Update:</span> <span id="lastupdate" class="pulse">Live</span></div>
         <div style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 10px;">
-            <button onclick="toggleFullscreen()" style="padding: 8px 16px; margin-right: 10px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+            <button onclick="toggleFullscreen()" style="padding: 6px 12px; margin-right: 8px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">
                 <i class="fas fa-expand"></i> Fullscreen
             </button>
-            <button onclick="exportMap()" style="padding: 8px 16px; margin-right: 10px; background: #4caf50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
-                <i class="fas fa-download"></i> Export Map
+            <button onclick="exportMap()" style="padding: 6px 12px; margin-right: 8px; background: #4caf50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">
+                <i class="fas fa-download"></i> Export
             </button>
-            <button id="orientationBtn" onclick="toggleOrientation()" style="padding: 8px 16px; margin-right: 10px; background: #ff9800; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
-                <i class="fas fa-compass"></i> <span id="orientationText">Orient Map</span>
-            </button>
-            <button id="rangeTestBtn" onclick="openRangeTestModal()" style="padding: 8px 16px; background: #9c27b0; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+            <button id="rangeTestBtn" onclick="openRangeTestModal()" style="padding: 6px 12px; background: #9c27b0; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">
                 <i class="fas fa-broadcast-tower"></i> <span id="rangeTestText">Start Test</span>
             </button>
             <span id="export-status" style="margin-left: 10px; font-size: 12px; color: #666;"></span>
@@ -483,16 +510,19 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
             // Note: Map rotation requires Leaflet.RotatedMarker plugin or similar
             // For now, orientation just changes the crosshairs icon rotation
             if (orientationEnabled && currentHeading !== null) {
-                // Rotate the crosshairs icon to show direction
+                // Rotate the arrow icon to show direction
                 var rotatedIcon = L.divIcon({
                     className: 'current-marker',
-                    html: '<i class="fa-solid fa-location-arrow" style="font-size: 32px; color: white; text-shadow: 0 0 3px #2196f3, 0 0 6px #2196f3, 0 0 10px #2196f3, 0 0 2px black; animation: pulse-smooth 3s infinite; transform: rotate(' + currentHeading + 'deg);"></i>',
+                    html: '<i class="fa-solid fa-circle-up" style="font-size: 32px; color: white; text-shadow: 0 0 3px #2196f3, 0 0 6px #2196f3, 0 0 10px #2196f3, 0 0 2px black; animation: pulse-smooth 3s infinite; transform: rotate(' + currentHeading + 'deg); transform-origin: center;"></i>',
                     iconSize: [32, 32],
                     iconAnchor: [16, 16]
                 });
                 if (currentMarker) {
                     currentMarker.setIcon(rotatedIcon);
                 }
+            } else if (!orientationEnabled && currentMarker) {
+                // Reset to crosshairs when orientation is disabled
+                currentMarker.setIcon(currentIcon);
             }
             
             // Update or create current position marker
@@ -648,16 +678,13 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
         // Orientation toggle
         function toggleOrientation() {
             orientationEnabled = !orientationEnabled;
-            const btn = document.getElementById('orientationText');
             const btnElement = document.getElementById('orientationBtn');
             
             if (orientationEnabled) {
-                btn.textContent = 'North Up';
-                btnElement.style.background = '#ff5722';
-                // Icon will be updated on next GPS update
+                btnElement.classList.add('active');
+                // Icon will be updated on next GPS update to show direction
             } else {
-                btn.textContent = 'Orient Map';
-                btnElement.style.background = '#ff9800';
+                btnElement.classList.remove('active');
                 // Reset to crosshairs icon
                 if (currentMarker) {
                     currentMarker.setIcon(currentIcon);
@@ -907,21 +934,24 @@ def send_lxmf_command():
         else:
             return jsonify({'success': False, 'error': 'Unknown command'})
         
-        # Write command to a file that LXMF-CLI can read
+        # Write command to file as a ONE-TIME TRIGGER
         command_file = os.path.join(STORAGE_DIR, 'rtcom_command.txt')
         
+        # Write command
         with open(command_file, 'w') as f:
             f.write(message + '\n')
         
-        # Note: For full integration, LXMF-CLI would need to:
-        # 1. Monitor this file for new commands
-        # 2. Execute them when detected
-        # 3. Or use a named pipe/socket for real-time communication
+        # Flush to ensure file is written
+        import time
+        time.sleep(0.1)
+        
+        # Note: The bridge plugin will clear the file after reading it
+        # This ensures the command is only executed once
         
         return jsonify({
             'success': True, 
             'message': message,
-            'note': 'Command written to rtcom_command.txt'
+            'note': 'Command sent to LXMF-CLI via rtcom_bridge plugin'
         })
     
     except Exception as e:
