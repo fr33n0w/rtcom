@@ -28,7 +28,7 @@ app = Flask(__name__)
 # Configuration
 PORT = 8033
 HOST = '0.0.0.0'  # Listen on all interfaces for LAN access
-GPS_UPDATE_INTERVAL = 2  # seconds between GPS updates
+GPS_UPDATE_INTERVAL = 1  # seconds between GPS updates
 HTML_REFRESH_INTERVAL = 5  # seconds between HTML file checks
 
 # Global state
@@ -45,7 +45,7 @@ current_gps = {
 gps_lock = Lock()
 
 # File paths (matching rangetest_client.py)
-STORAGE_DIR = os.path.expanduser('~/.lxmf')
+STORAGE_DIR = os.path.expanduser('~/.lxmf/lxmf_client_storage')
 HTML_FILE = os.path.join(STORAGE_DIR, 'rangetest.html')
 JSON_FILE = os.path.join(STORAGE_DIR, 'rangetest.json')
 
