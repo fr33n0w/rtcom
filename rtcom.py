@@ -45,7 +45,7 @@ current_gps = {
 gps_lock = Lock()
 
 # File paths (matching rangetest_client.py)
-STORAGE_DIR = os.path.expanduser('~/.lxmf/lxmf_client_storage')
+STORAGE_DIR = os.path.expanduser('/data/data/com.termux/files/home/lxmf-cli/lxmf_client_storage')
 HTML_FILE = os.path.join(STORAGE_DIR, 'rangetest.html')
 JSON_FILE = os.path.join(STORAGE_DIR, 'rangetest.json')
 
