@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Range Test Web Server - Companion to rangetest_client.py plugin for LXMF-CLI
+rtcom.py - Range Test Termux Companion App WebUI for LXMF-CLI rangetest plugin
 Exposes the range test HTML map via Flask on localhost:8033
 Features:
 - Live HTML map with auto-refresh
-- Current GPS position tracking (like a navigator)
+- Current GPS position tracking (red arrow like a navigator)
 - Real-time point updates
 - Mobile-optimized interface
 
@@ -254,13 +254,21 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
         var currentCircle = null;
         var rssiValues = [];
         var snrValues = [];
+        var userSetZoom = false;
+        var currentZoom = 16;
         
-        // Current position marker (pulsing blue)
+        // Track user zoom changes
+        map.on('zoomend', function() {
+            userSetZoom = true;
+            currentZoom = map.getZoom();
+        });
+        
+        // Current position marker (red arrow pointing up, on top layer)
         var currentIcon = L.divIcon({
             className: 'current-marker',
-            html: '<div style="background-color: #2196f3; width: 20px; height: 20px; border-radius: 50%; border: 4px solid white; box-shadow: 0 0 10px rgba(33,150,243,0.8); animation: pulse 2s infinite;"></div>',
-            iconSize: [20, 20],
-            iconAnchor: [10, 10]
+            html: '<div style="width: 0; height: 0; border-left: 12px solid transparent; border-right: 12px solid transparent; border-bottom: 24px solid #ff0000; filter: drop-shadow(0 0 8px rgba(255,0,0,0.8)); animation: pulse 2s infinite;"></div>',
+            iconSize: [24, 24],
+            iconAnchor: [12, 24]
         });
         
         function getSignalColor(rssi) {
@@ -304,11 +312,11 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
         legend.onAdd = function(map) {
             var div = L.DomUtil.create('div', 'legend');
             div.innerHTML = '<div style="font-weight: bold; margin-bottom: 5px;">🗺️ Live Navigator</div>' +
-                          '<div class="legend-item">🔵 Current Position</div>' +
+                          '<div class="legend-item">🔺 Current Position</div>' +
                           '<div class="legend-item">🟢 Start Point</div>' +
                           '<div class="legend-item">🔴 End Point</div>' +
                           '<div class="legend-item">━━ Path</div>' +
-                          '<div style="margin-top: 8px; font-size: 11px; color: #666;">Auto-updates every 5s</div>';
+                          '<div style="margin-top: 8px; font-size: 11px; color: #666;">Auto-updates every 1s</div>';
             return div;
         };
         legend.addTo(map);
@@ -344,8 +352,11 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
             if (currentMarker) {
                 currentMarker.setLatLng(latlng);
             } else {
-                currentMarker = L.marker(latlng, {icon: currentIcon}).addTo(map);
-                currentMarker.bindPopup('<b>📍 Current Position</b><br>' +
+                currentMarker = L.marker(latlng, {
+                    icon: currentIcon,
+                    zIndexOffset: 1000  // Put on top of all other markers
+                }).addTo(map);
+                currentMarker.bindPopup('<b>🔺 Current Position</b><br>' +
                     'Live GPS tracking<br>' +
                     'Accuracy: ±' + gps.accuracy.toFixed(0) + 'm');
             }
@@ -357,16 +368,21 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
             } else {
                 currentCircle = L.circle(latlng, {
                     radius: gps.accuracy,
-                    color: '#2196f3',
-                    fillColor: '#2196f3',
+                    color: '#ff0000',
+                    fillColor: '#ff0000',
                     fillOpacity: 0.1,
                     weight: 2
                 }).addTo(map);
             }
             
-            // Center map on current position with zoom appropriate for accuracy
-            var zoom = gps.accuracy > 100 ? 14 : gps.accuracy > 50 ? 15 : 16;
-            map.setView(latlng, zoom);
+            // Center map on current position, preserving user's zoom level
+            if (!userSetZoom) {
+                // First time or no user interaction - set appropriate zoom
+                currentZoom = gps.accuracy > 100 ? 14 : gps.accuracy > 50 ? 15 : 16;
+            }
+            
+            // Always center on current position, but keep user's zoom
+            map.setView(latlng, currentZoom, {animate: true, duration: 0.5});
         }
         
         function updateLoggedPoints(points) {
@@ -395,7 +411,10 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
                 var isEnd = (idx === points.length - 1);
                 var icon = createLoggedIcon(point.rssi, isStart, isEnd);
                 
-                var marker = L.marker(latlng, {icon: icon}).addTo(map);
+                var marker = L.marker(latlng, {
+                    icon: icon,
+                    zIndexOffset: 0  // Logged points stay below current position
+                }).addTo(map);
                 
                 var popup = '<b>Point #' + (idx + 1) + '</b><br>' +
                     'Time: ' + point.time + '<br>' +
@@ -413,13 +432,18 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
                 loggedMarkers.push(marker);
             });
             
-            // Draw path
+            // Draw path (below markers)
             if (loggedPoints.length > 1) {
                 polyline = L.polyline(loggedPoints, {
                     color: 'red',
                     weight: 3,
                     opacity: 0.6
                 }).addTo(map);
+                
+                // Bring current marker to front if it exists
+                if (currentMarker) {
+                    currentMarker.bringToFront();
+                }
             }
             
             // Update stats
@@ -500,7 +524,7 @@ def static_map():
 def print_banner():
     """Print startup banner"""
     print("\n" + "="*70)
-    print("🗺️  Range Test Navigator - Live Web Server")
+    print("🗺️  rtcom - Range Test Termux Companion App WebUI")
     print("="*70)
     print(f"📡 Listening on: http://{HOST}:{PORT}")
     print(f"🌐 Local access: http://localhost:{PORT}")
@@ -541,8 +565,8 @@ def main():
     # Check if storage directory exists
     if not os.path.exists(STORAGE_DIR):
         print(f"⚠️  Warning: Storage directory not found: {STORAGE_DIR}")
-        print(f"   Creating directory...")
-        os.makedirs(STORAGE_DIR, exist_ok=True)
+        print(f"   Make sure LXMF-CLI is running from the correct directory")
+        print(f"   Expected: /data/data/com.termux/files/home/lxmf-cli/")
     
     # Start GPS updater thread (only on Termux)
     if is_termux():
