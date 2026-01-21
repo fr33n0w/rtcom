@@ -206,6 +206,10 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
         }
+        @keyframes pulse-smooth {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(1.1); }
+        }
         .legend {
             background: white;
             padding: 10px;
@@ -275,12 +279,12 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
             currentZoom = map.getZoom();
         });
         
-        // Current position marker (red car icon from Font Awesome, on top layer)
+        // Current position marker (white crosshairs with blue outline, on top layer)
         var currentIcon = L.divIcon({
             className: 'current-marker',
-            html: '<i class="fas fa-car" style="font-size: 28px; color: #ff0000; filter: drop-shadow(0 0 8px rgba(255,0,0,0.8)); animation: pulse 2s infinite;"></i>',
-            iconSize: [28, 28],
-            iconAnchor: [14, 14]
+            html: '<i class="fa-solid fa-crosshairs" style="font-size: 32px; color: white; text-shadow: 0 0 3px #2196f3, 0 0 6px #2196f3, 0 0 10px #2196f3, 0 0 2px black; animation: pulse-smooth 3s infinite;"></i>',
+            iconSize: [32, 32],
+            iconAnchor: [16, 16]
         });
         
         function getSignalColor(rssi) {
@@ -324,7 +328,7 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
         legend.onAdd = function(map) {
             var div = L.DomUtil.create('div', 'legend');
             div.innerHTML = '<div style="font-weight: bold; margin-bottom: 5px;">🗺️ Live Navigator</div>' +
-                          '<div class="legend-item"><i class="fas fa-car" style="color: #ff0000;"></i> Current Position</div>' +
+                          '<div class="legend-item"><i class="fa-solid fa-crosshairs" style="color: #2196f3;"></i> Current Position</div>' +
                           '<div class="legend-item">🟢 Start Point</div>' +
                           '<div class="legend-item">🔴 End Point</div>' +
                           '<div class="legend-item">━━ Path</div>' +
@@ -368,23 +372,26 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
                     icon: currentIcon,
                     zIndexOffset: 1000  // Put on top of all other markers
                 }).addTo(map);
-                currentMarker.bindPopup('<b><i class="fas fa-car" style="color: #ff0000;"></i> Current Position</b><br>' +
+                currentMarker.bindPopup('<b><i class="fa-solid fa-crosshairs" style="color: #2196f3;"></i> Current Position</b><br>' +
                     'Live GPS tracking<br>' +
                     'Accuracy: ±' + gps.accuracy.toFixed(0) + 'm');
             }
             
-            // Update or create accuracy circle
+            // Update or create accuracy circle (blue with white outline, on top)
             if (currentCircle) {
                 currentCircle.setLatLng(latlng);
                 currentCircle.setRadius(gps.accuracy);
             } else {
                 currentCircle = L.circle(latlng, {
                     radius: gps.accuracy,
-                    color: '#ff0000',
-                    fillColor: '#ff0000',
-                    fillOpacity: 0.1,
-                    weight: 2
+                    color: 'white',           // White outline
+                    fillColor: '#2196f3',     // Blue fill
+                    fillOpacity: 0.15,
+                    weight: 3,
+                    opacity: 0.8,
+                    className: 'accuracy-circle'
                 }).addTo(map);
+                currentCircle.bringToFront();  // Bring to front layer
             }
             
             // Center map on current position, preserving user's zoom level
@@ -451,11 +458,14 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
                     weight: 3,
                     opacity: 0.6
                 }).addTo(map);
-                
-                // Bring current marker to front if it exists
-                if (currentMarker) {
-                    currentMarker.bringToFront();
-                }
+            }
+            
+            // Bring current position elements to front
+            if (currentCircle) {
+                currentCircle.bringToFront();
+            }
+            if (currentMarker) {
+                currentMarker.bringToFront();
             }
             
             // Update stats
