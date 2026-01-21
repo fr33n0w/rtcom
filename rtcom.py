@@ -18,6 +18,7 @@ import os
 import sys
 import json
 import time
+import shutil
 import subprocess
 from datetime import datetime
 from flask import Flask, render_template_string, jsonify, send_file
@@ -157,14 +158,14 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
         #map { 
             position: absolute; 
             top: 0; 
-            bottom: 180px; 
+            bottom: 220px; 
             width: 100%; 
         }
         #info {
             position: absolute; 
             bottom: 0; 
             width: 100%; 
-            height: 180px;
+            height: 220px;
             background: rgba(255, 255, 255, 0.95); 
             padding: 15px;
             box-sizing: border-box; 
@@ -216,11 +217,13 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
             margin: 4px 0;
         }
         @media (max-width: 600px) {
-            #info { height: 200px; }
+            #info { height: 260px; }
+            #map { bottom: 260px; }
             .stat { display: block; margin: 3px 0; }
         }
     </style>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
@@ -237,6 +240,15 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
         <div class="stat"><span class="stat-label">Avg RSSI:</span> <span id="avgrssi">N/A</span></div>
         <div class="stat"><span class="stat-label">Avg SNR:</span> <span id="avgsnr">N/A</span></div>
         <div class="stat"><span class="stat-label">Last Update:</span> <span id="lastupdate" class="pulse">Live</span></div>
+        <div style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 10px;">
+            <button onclick="toggleFullscreen()" style="padding: 8px 16px; margin-right: 10px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                <i class="fas fa-expand"></i> Fullscreen
+            </button>
+            <button onclick="exportMap()" style="padding: 8px 16px; background: #4caf50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                <i class="fas fa-download"></i> Export Map
+            </button>
+            <span id="export-status" style="margin-left: 10px; font-size: 12px; color: #666;"></span>
+        </div>
     </div>
 
     <script>
@@ -263,12 +275,12 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
             currentZoom = map.getZoom();
         });
         
-        // Current position marker (red arrow pointing up, on top layer)
+        // Current position marker (red car icon from Font Awesome, on top layer)
         var currentIcon = L.divIcon({
             className: 'current-marker',
-            html: '<div style="width: 0; height: 0; border-left: 12px solid transparent; border-right: 12px solid transparent; border-bottom: 24px solid #ff0000; filter: drop-shadow(0 0 8px rgba(255,0,0,0.8)); animation: pulse 2s infinite;"></div>',
-            iconSize: [24, 24],
-            iconAnchor: [12, 24]
+            html: '<i class="fas fa-car" style="font-size: 28px; color: #ff0000; filter: drop-shadow(0 0 8px rgba(255,0,0,0.8)); animation: pulse 2s infinite;"></i>',
+            iconSize: [28, 28],
+            iconAnchor: [14, 14]
         });
         
         function getSignalColor(rssi) {
@@ -312,7 +324,7 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
         legend.onAdd = function(map) {
             var div = L.DomUtil.create('div', 'legend');
             div.innerHTML = '<div style="font-weight: bold; margin-bottom: 5px;">🗺️ Live Navigator</div>' +
-                          '<div class="legend-item">🔺 Current Position</div>' +
+                          '<div class="legend-item"><i class="fas fa-car" style="color: #ff0000;"></i> Current Position</div>' +
                           '<div class="legend-item">🟢 Start Point</div>' +
                           '<div class="legend-item">🔴 End Point</div>' +
                           '<div class="legend-item">━━ Path</div>' +
@@ -356,7 +368,7 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
                     icon: currentIcon,
                     zIndexOffset: 1000  // Put on top of all other markers
                 }).addTo(map);
-                currentMarker.bindPopup('<b>🔺 Current Position</b><br>' +
+                currentMarker.bindPopup('<b><i class="fas fa-car" style="color: #ff0000;"></i> Current Position</b><br>' +
                     'Live GPS tracking<br>' +
                     'Accuracy: ±' + gps.accuracy.toFixed(0) + 'm');
             }
@@ -481,6 +493,46 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
                 .catch(err => console.error('Points fetch error:', err));
         }
         
+        // Fullscreen toggle
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.error('Fullscreen error:', err);
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        }
+        
+        // Export map to /sdcard/Download
+        function exportMap() {
+            const statusEl = document.getElementById('export-status');
+            statusEl.textContent = 'Exporting...';
+            statusEl.style.color = '#0078d4';
+            
+            fetch('/api/export_map', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    statusEl.textContent = '✅ ' + data.filename;
+                    statusEl.style.color = '#4caf50';
+                    setTimeout(() => {
+                        statusEl.textContent = '';
+                    }, 5000);
+                } else {
+                    statusEl.textContent = '❌ ' + data.error;
+                    statusEl.style.color = '#f44336';
+                }
+            })
+            .catch(err => {
+                statusEl.textContent = '❌ Export failed';
+                statusEl.style.color = '#f44336';
+                console.error('Export error:', err);
+            });
+        }
+        
         // Initial load
         fetchCurrentGPS();
         fetchLoggedPoints();
@@ -521,6 +573,36 @@ def static_map():
     else:
         return "Range test map not found. Start logging points first!", 404
 
+@app.route('/api/export_map', methods=['POST'])
+def export_map():
+    """Export current map HTML to /sdcard/Download with timestamp"""
+    try:
+        if not is_termux():
+            return jsonify({'success': False, 'error': 'Export only works on Termux/Android'})
+        
+        download_dir = '/sdcard/Download'
+        
+        if not os.path.exists(download_dir):
+            return jsonify({'success': False, 'error': '/sdcard/Download not found'})
+        
+        # Generate timestamp filename
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'rangetest_{timestamp}.html'
+        dest_path = os.path.join(download_dir, filename)
+        
+        # Check if source HTML exists
+        if not os.path.exists(HTML_FILE):
+            return jsonify({'success': False, 'error': 'No range test data to export'})
+        
+        # Copy HTML file to Download folder
+        import shutil
+        shutil.copy(HTML_FILE, dest_path)
+        
+        return jsonify({'success': True, 'filename': filename, 'path': dest_path})
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 def print_banner():
     """Print startup banner"""
     print("\n" + "="*70)
@@ -550,10 +632,11 @@ def print_banner():
         print(f"\n⚠️  Not on Termux - GPS tracking disabled")
     
     print(f"\n📍 Endpoints:")
-    print(f"   /              Live navigator with current position")
-    print(f"   /map           Original static map")
+    print(f"   /                   Live navigator with current position")
+    print(f"   /map                Original static map")
     print(f"   /api/current_gps    Current GPS JSON")
     print(f"   /api/logged_points  Logged points JSON")
+    print(f"   /api/export_map     Export map to /sdcard/Download (POST)")
     
     print("\n💡 Press Ctrl+C to stop")
     print("="*70 + "\n")
