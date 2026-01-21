@@ -21,7 +21,7 @@ import time
 import shutil
 import subprocess
 from datetime import datetime
-from flask import Flask, render_template_string, jsonify, send_file
+from flask import Flask, render_template_string, jsonify, send_file, request
 from threading import Thread, Lock
 
 app = Flask(__name__)
@@ -39,6 +39,7 @@ current_gps = {
     'accuracy': None,
     'speed': None,
     'altitude': None,
+    'bearing': None,
     'provider': None,
     'timestamp': None,
     'available': False
@@ -117,6 +118,7 @@ def gps_updater():
                         'accuracy': gps_data.get('accuracy', 0),
                         'speed': gps_data.get('speed', 0),
                         'altitude': gps_data.get('altitude', 0),
+                        'bearing': gps_data.get('bearing', None),
                         'provider': gps_data.get('provider', 'unknown'),
                         'timestamp': datetime.now().isoformat(),
                         'available': True
@@ -158,14 +160,14 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
         #map { 
             position: absolute; 
             top: 0; 
-            bottom: 220px; 
+            bottom: 250px; 
             width: 100%; 
         }
         #info {
             position: absolute; 
             bottom: 0; 
             width: 100%; 
-            height: 220px;
+            height: 250px;
             background: rgba(255, 255, 255, 0.95); 
             padding: 15px;
             box-sizing: border-box; 
@@ -221,9 +223,73 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
             margin: 4px 0;
         }
         @media (max-width: 600px) {
-            #info { height: 260px; }
-            #map { bottom: 260px; }
+            #info { height: 300px; }
+            #map { bottom: 300px; }
             .stat { display: block; margin: 3px 0; }
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        .modal-content {
+            background-color: white;
+            margin: 15% auto;
+            padding: 20px;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 400px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        .modal-header {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #0078d4;
+        }
+        .modal-input {
+            width: 100%;
+            padding: 8px;
+            margin: 8px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 14px;
+        }
+        .modal-label {
+            display: block;
+            margin-top: 10px;
+            font-weight: bold;
+            color: #333;
+        }
+        .modal-buttons {
+            margin-top: 20px;
+            text-align: right;
+        }
+        .modal-btn {
+            padding: 8px 16px;
+            margin-left: 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .modal-btn-primary {
+            background: #4caf50;
+            color: white;
+        }
+        .modal-btn-cancel {
+            background: #ddd;
+            color: #333;
+        }
+        .modal-btn-stop {
+            background: #f44336;
+            color: white;
         }
     </style>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -248,10 +314,52 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
             <button onclick="toggleFullscreen()" style="padding: 8px 16px; margin-right: 10px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
                 <i class="fas fa-expand"></i> Fullscreen
             </button>
-            <button onclick="exportMap()" style="padding: 8px 16px; background: #4caf50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+            <button onclick="exportMap()" style="padding: 8px 16px; margin-right: 10px; background: #4caf50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
                 <i class="fas fa-download"></i> Export Map
             </button>
+            <button id="orientationBtn" onclick="toggleOrientation()" style="padding: 8px 16px; margin-right: 10px; background: #ff9800; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                <i class="fas fa-compass"></i> <span id="orientationText">Orient Map</span>
+            </button>
+            <button id="rangeTestBtn" onclick="openRangeTestModal()" style="padding: 8px 16px; background: #9c27b0; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                <i class="fas fa-broadcast-tower"></i> <span id="rangeTestText">Start Test</span>
+            </button>
             <span id="export-status" style="margin-left: 10px; font-size: 12px; color: #666;"></span>
+        </div>
+    </div>
+
+    <!-- Range Test Modal -->
+    <div id="rangeTestModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <i class="fas fa-broadcast-tower"></i> Configure Range Test
+            </div>
+            <label class="modal-label">Contact Index (#):</label>
+            <input type="number" id="contactIndex" class="modal-input" placeholder="e.g., 1" min="0" value="0">
+            
+            <label class="modal-label">Number of Pings (N):</label>
+            <input type="number" id="pingCount" class="modal-input" placeholder="e.g., 10" min="1" value="10">
+            
+            <label class="modal-label">Delay Between Pings (D) seconds:</label>
+            <input type="number" id="pingDelay" class="modal-input" placeholder="e.g., 5" min="1" value="5">
+            
+            <div class="modal-buttons">
+                <button class="modal-btn modal-btn-cancel" onclick="closeRangeTestModal()">Cancel</button>
+                <button class="modal-btn modal-btn-primary" onclick="startRangeTest()">Start Test</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stop Range Test Modal -->
+    <div id="stopTestModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <i class="fas fa-stop-circle"></i> Stop Range Test
+            </div>
+            <p style="margin: 15px 0;">Are you sure you want to stop the range test?</p>
+            <div class="modal-buttons">
+                <button class="modal-btn modal-btn-cancel" onclick="closeStopTestModal()">Cancel</button>
+                <button class="modal-btn modal-btn-stop" onclick="stopRangeTest()">Stop Test</button>
+            </div>
         </div>
     </div>
 
@@ -272,6 +380,9 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
         var snrValues = [];
         var userSetZoom = false;
         var currentZoom = 16;
+        var orientationEnabled = false;
+        var currentHeading = 0;
+        var rangeTestActive = false;
         
         // Track user zoom changes
         map.on('zoomend', function() {
@@ -363,6 +474,26 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
                 'Provider: ' + gps.provider;
             
             var latlng = [gps.latitude, gps.longitude];
+            
+            // Update heading if available
+            if (gps.bearing !== null && gps.bearing !== undefined) {
+                currentHeading = gps.bearing;
+            }
+            
+            // Note: Map rotation requires Leaflet.RotatedMarker plugin or similar
+            // For now, orientation just changes the crosshairs icon rotation
+            if (orientationEnabled && currentHeading !== null) {
+                // Rotate the crosshairs icon to show direction
+                var rotatedIcon = L.divIcon({
+                    className: 'current-marker',
+                    html: '<i class="fa-solid fa-location-arrow" style="font-size: 32px; color: white; text-shadow: 0 0 3px #2196f3, 0 0 6px #2196f3, 0 0 10px #2196f3, 0 0 2px black; animation: pulse-smooth 3s infinite; transform: rotate(' + currentHeading + 'deg);"></i>',
+                    iconSize: [32, 32],
+                    iconAnchor: [16, 16]
+                });
+                if (currentMarker) {
+                    currentMarker.setIcon(rotatedIcon);
+                }
+            }
             
             // Update or create current position marker
             if (currentMarker) {
@@ -514,6 +645,146 @@ NAVIGATOR_TEMPLATE = '''<!DOCTYPE html>
             }
         }
         
+        // Orientation toggle
+        function toggleOrientation() {
+            orientationEnabled = !orientationEnabled;
+            const btn = document.getElementById('orientationText');
+            const btnElement = document.getElementById('orientationBtn');
+            
+            if (orientationEnabled) {
+                btn.textContent = 'North Up';
+                btnElement.style.background = '#ff5722';
+                // Icon will be updated on next GPS update
+            } else {
+                btn.textContent = 'Orient Map';
+                btnElement.style.background = '#ff9800';
+                // Reset to crosshairs icon
+                if (currentMarker) {
+                    currentMarker.setIcon(currentIcon);
+                }
+            }
+        }
+        
+        // Range Test Modal Functions
+        function openRangeTestModal() {
+            if (rangeTestActive) {
+                // Show stop confirmation
+                document.getElementById('stopTestModal').style.display = 'block';
+            } else {
+                // Show start configuration
+                document.getElementById('rangeTestModal').style.display = 'block';
+            }
+        }
+        
+        function closeRangeTestModal() {
+            document.getElementById('rangeTestModal').style.display = 'none';
+        }
+        
+        function closeStopTestModal() {
+            document.getElementById('stopTestModal').style.display = 'none';
+        }
+        
+        function startRangeTest() {
+            const contactIndex = document.getElementById('contactIndex').value;
+            const pingCount = document.getElementById('pingCount').value;
+            const pingDelay = document.getElementById('pingDelay').value;
+            
+            if (!contactIndex || !pingCount || !pingDelay) {
+                alert('Please fill all fields');
+                return;
+            }
+            
+            const statusEl = document.getElementById('export-status');
+            statusEl.textContent = 'Starting range test...';
+            statusEl.style.color = '#9c27b0';
+            
+            fetch('/api/send_lxmf_command', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    contact_index: contactIndex,
+                    command: 'rt',
+                    ping_count: pingCount,
+                    ping_delay: pingDelay
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    rangeTestActive = true;
+                    document.getElementById('rangeTestText').textContent = 'Stop Test';
+                    document.getElementById('rangeTestBtn').style.background = '#f44336';
+                    statusEl.textContent = '✅ Range test started';
+                    statusEl.style.color = '#4caf50';
+                    closeRangeTestModal();
+                } else {
+                    statusEl.textContent = '❌ ' + data.error;
+                    statusEl.style.color = '#f44336';
+                }
+                setTimeout(() => { statusEl.textContent = ''; }, 5000);
+            })
+            .catch(err => {
+                statusEl.textContent = '❌ Command failed';
+                statusEl.style.color = '#f44336';
+                console.error('Command error:', err);
+            });
+        }
+        
+        function stopRangeTest() {
+            const contactIndex = document.getElementById('contactIndex').value;
+            
+            const statusEl = document.getElementById('export-status');
+            statusEl.textContent = 'Stopping range test...';
+            statusEl.style.color = '#f44336';
+            
+            fetch('/api/send_lxmf_command', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    contact_index: contactIndex,
+                    command: 'rs'
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    rangeTestActive = false;
+                    document.getElementById('rangeTestText').textContent = 'Start Test';
+                    document.getElementById('rangeTestBtn').style.background = '#9c27b0';
+                    statusEl.textContent = '✅ Range test stopped';
+                    statusEl.style.color = '#4caf50';
+                    closeStopTestModal();
+                } else {
+                    statusEl.textContent = '❌ ' + data.error;
+                    statusEl.style.color = '#f44336';
+                }
+                setTimeout(() => { statusEl.textContent = ''; }, 5000);
+            })
+            .catch(err => {
+                statusEl.textContent = '❌ Stop command failed';
+                statusEl.style.color = '#f44336';
+                console.error('Command error:', err);
+            });
+        }
+        
+        // Close modals when clicking outside
+        window.onclick = function(event) {
+            if (event.target.classList.contains('modal')) {
+                event.target.style.display = 'none';
+            }
+        }
+        
+        // Export map to /sdcard/Download
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.error('Fullscreen error:', err);
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        }
+        
         // Export map to /sdcard/Download
         function exportMap() {
             const statusEl = document.getElementById('export-status');
@@ -609,6 +880,49 @@ def export_map():
         shutil.copy(HTML_FILE, dest_path)
         
         return jsonify({'success': True, 'filename': filename, 'path': dest_path})
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/send_lxmf_command', methods=['POST'])
+def send_lxmf_command():
+    """Send command to LXMF-CLI via command file"""
+    try:
+        data = request.get_json()
+        contact_index = data.get('contact_index')
+        command = data.get('command')
+        
+        if not contact_index or not command:
+            return jsonify({'success': False, 'error': 'Missing required fields'})
+        
+        # Build message based on command
+        if command == 'rt':
+            # Start range test: s # rt N D
+            ping_count = data.get('ping_count', 10)
+            ping_delay = data.get('ping_delay', 5)
+            message = f"s {contact_index} rt {ping_count} {ping_delay}"
+        elif command == 'rs':
+            # Stop range test: s # rs
+            message = f"s {contact_index} rs"
+        else:
+            return jsonify({'success': False, 'error': 'Unknown command'})
+        
+        # Write command to a file that LXMF-CLI can read
+        command_file = os.path.join(STORAGE_DIR, 'rtcom_command.txt')
+        
+        with open(command_file, 'w') as f:
+            f.write(message + '\n')
+        
+        # Note: For full integration, LXMF-CLI would need to:
+        # 1. Monitor this file for new commands
+        # 2. Execute them when detected
+        # 3. Or use a named pipe/socket for real-time communication
+        
+        return jsonify({
+            'success': True, 
+            'message': message,
+            'note': 'Command written to rtcom_command.txt'
+        })
     
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
